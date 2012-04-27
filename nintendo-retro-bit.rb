@@ -2,11 +2,30 @@
 require 'usb'
 require 'pp'
 
-# This is an example of reading input from an NES controller throught the RetroBit USB adapter. At the moment, the device seems pretty flakey. However, it could just be the old controllers that are causing the issue.
-
 byte_format = "C*"
 vendor_id = 0x1292
 product_id = 0x4643
+
+@@prev = [0,0]
+@@prev_n = []
+@@counts = Hash.new
+
+def debounce(state) 
+    if @@prev_n.size >= 5
+      old = @@prev_n.delete_at(0)
+      @@counts[old] = @@counts[old] - 1 
+    end
+    @@prev_n << state
+
+
+    if @@counts[state]
+      @@counts[state] = @@counts[state]+1
+    elsif
+      @@counts[state] = 1
+    end
+
+    return @@counts.invert.max.last
+end
 
 dev = USB.devices.select{|d| d.idVendor==vendor_id && d.idProduct==product_id}.first
 fail "no device detected" unless dev
@@ -29,15 +48,15 @@ dev.open { |h|
   actions << Proc.new { |state| print 'Start'   if state[1] == 0x08 }
   actions << Proc.new { |state| print 'Select'  if state[1] == 0x04 }
 
-  prev = [0,0]
   loop do
     begin
       h.usb_bulk_read(endpoint, data, 10)
       state = data.unpack(byte_format)
-      if (prev != state)
-        actions.each { |a| a.call(state) }
-        pp state
-        prev = Array.new(state)
+      most_common_state = debounce(state)
+      if (most_common_state != @@prev)
+        actions.each { |a| a.call(most_common_state) }
+        pp most_common_state
+        prev = Array.new(most_common_state)
       end
     rescue Errno::ETIMEDOUT => e
     rescue Interrupt
@@ -46,3 +65,5 @@ dev.open { |h|
   end
 
 }
+
+
